@@ -1,0 +1,64 @@
+name: Build and Release DXVK Low-Latency + GPLAsync v3
+
+on:
+  push:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc g++ \
+            gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 \
+            gcc-mingw-w64-i686 g++-mingw-w64-i686 \
+            mingw-w64-tools \
+            meson ninja-build glslang-tools zstd patch curl
+
+      - name: Download and apply GPLAsync patch
+        run: |
+          curl -sSL "https://gitlab.com/Ph42oN/dxvk-gplasync/-/raw/main/patches/dxvk-gplasync-3.1.1-1.patch" -o gplasync.patch
+          
+          git apply gplasync.patch || patch -p1 < gplasync.patch
+
+      - name: Build DXVK
+        run: |
+          ./package-release.sh master dist --no-package
+
+      - name: Package artifacts
+        run: |
+          cd dist
+          tar -czf dxvk-low-latency-gplasync-v3.tar.gz *
+          echo "RELEASE_TAG=dxvk-v3-hybrid-${GITHUB_RUN_NUMBER}" >> $GITHUB_ENV
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "DXVK Low-Latency + GPLAsync v3 (Build ${{ github.run_number }})"
+          body: |
+            ### Hybrid DXVK: Low-Latency + GPLAsync
+            - **DXVK Version:** Based on `dxvk-low-latency`
+            - **Patch:** `dxvk-gplasync-3.1.1-1.patch` (Ph42oN)
+            - **x64 Target:** `x86-64-v3` (`-O3 -flto`)
+            - **x32 Target:** Optimized (`-O3 -flto`)
+            - **Commit:** ${{ github.sha }}
+          files: |
+            dist/*.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
